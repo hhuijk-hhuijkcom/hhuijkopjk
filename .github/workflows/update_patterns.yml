@@ -1,4 +1,5 @@
 name: Update Pattern TOML
+
 on:
   # 每天检查一次 Steam 更新
   schedule:
@@ -14,8 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-          branches: [pattern, ipc, main, protobuf]   # 拉全部分支找种子
+          fetch-depth: 0       # 拉完整历史 (含所有分支)
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -23,52 +23,49 @@ jobs:
           python-version: '3.12'
 
       - name: Install deps
-        run: pip install pefile capstone --quiet
+        run: pip install pefile --quiet
+        # 注: capstone 在 sig 自匹配里没用 (纯 pefile + struct 足够), 省了
 
-      # === 下载最新 Steam ===
+      # === 下载 Steam DLL ===
       - name: Download latest steamclient64.dll
         run: |
-          # Steam 官方 CDN (自动跟踪最新稳定版)
-          # 也可以换成 steam-cdn 镜像
           New-Item -ItemType Directory -Force -Path dlls | Out-Null
-          Invoke-WebRequest -Uri "https://steamcdn-a.akamaihd.net/client/installer/steamclient.dll" -OutFile "dlls\steamclient.dll" -UseBasicParsing
-          # 64 位版: steamclient64.dll 通常随 Steam 主包提供
-          # 如果 64 位版单独分发, 换用对应 URL
-          Invoke-WebRequest -Uri "https://steamcdn-a.akamaihd.net/client/installer/steamui.dll" -OutFile "dlls\steamui.dll" -UseBasicParsing
-        timeout-minutes: 10
+          # Steam 官方 CDN, 固定稳定版 URL
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri "https://steamcdn-a.akamaihd.net/client/installer/steamclient.dll" -OutFile "dlls\steamclient.dll"
+          if (Test-Path "dlls\steamclient64.dll") { Remove-Item "dlls\steamclient64.dll" }
+          # steamui.dll 随 Steam 主安装包走, CDN 上没有单独 URL
+          # 如果 fork 里已有 seed, 可跳过 download steamui 这步
 
       # === 生成 pattern TOML ===
       - name: Run pattern updater (steamclient)
         run: |
           python pattern_updater.py --dll "dlls\steamclient.dll" --component steamclient --out_dir "./output"
-        continue-on-error: true
 
-      - name: Run pattern updater (steamui)
+      # === 提交到 pattern 分支 ===
+      - name: Commit to pattern branch
         run: |
-          python pattern_updater.py --dll "dlls\steamui.dll" --component steamui --out_dir "./output"
-        continue-on-error: true
+          $sha = (Get-FileHash "dlls\steamclient.dll" -Algorithm SHA256).Hash.ToLower()
+          git config user.name "OpenSteamTool Bot"
+          git config user.email "bot@users.noreply.github.com"
 
-      # === 提交 ===
-      - name: Commit and push pattern branch
-        run: |
-          $sha256 = (Get-FileHash "dlls\steamclient.dll" -Algorithm SHA256).Hash.ToLower()
-          git checkout pattern
-          if (Test-Path "output\pattern\steamclient\$sha256.toml") {
-            Copy-Item "output\pattern\steamclient\$sha256.toml" "steamclient\$sha256.toml" -Force
-            git add -A
-            git config user.name "OpenSteamTool Bot"
-            git config user.email "bot@users.noreply.github.com"
-            git commit -m "pattern: add/update steamclient $sha256" || echo "nothing changed"
-            git push origin pattern || echo "push failed"
+          # 先切到 pattern 分支 (不存在就从 main 新建)
+          $branchExists = git branch --list pattern
+          if (-not $branchExists) {
+            git checkout -b pattern
+          } else {
+            git checkout pattern
+            git pull origin pattern
           }
 
-      - name: Run pattern updater (steamui) — commit to pattern branch
-        run: |
-          $sha256 = (Get-FileHash "dlls\steamui.dll" -Algorithm SHA256).Hash.ToLower()
-          git checkout pattern
-          if (Test-Path "output\pattern\steamui\$sha256.toml") {
-            Copy-Item "output\pattern\steamui\$sha256.toml" "steamui\$sha256.toml" -Force
-            git add -A
-            git commit -m "pattern: add/update steamui $sha256" || echo "nothing changed"
-            git push origin pattern || echo "push failed"
+          $src = "output\pattern\steamclient\$sha.toml"
+          if (Test-Path $src) {
+            New-Item -ItemType Directory -Force -Path "steamclient" | Out-Null
+            Copy-Item $src "steamclient\$sha.toml" -Force
+            git add "steamclient\$sha.toml"
+            git commit -m "pattern: steamclient64 $sha" || Write-Output "no changes"
+            git push origin pattern || Write-Output "push failed (need auth?)"
+          } else {
+            Write-Output "No TOML generated — upstream may already have it"
           }
+        continue-on-error: true
