@@ -63,34 +63,49 @@ jobs:
 
           if (-not $found) {
             Write-Output "::warning::No Steam DLLs found in Release or staging/. Either upload a release asset or commit to staging/"
-            $env:HAS_DLL = "false"
+            "HAS_DLL=false" | Add-Content -Path $env:GITHUB_ENV
           } else {
-            $env:HAS_DLL = "true"
+            Write-Output "[OK] DLL(s) ready"
+            "HAS_DLL=true" | Add-Content -Path $env:GITHUB_ENV
           }
 
       - name: Generate pattern TOMLs
         if: env.HAS_DLL == 'true'
         run: |
-          # 从上游 steam-monitor 抄最新 TOML 当 seed
-          try {
-            $upDir = "upstream_seed"
-            New-Item -ItemType Directory -force -path $upDir, "$upDir\steamclient", "$upDir\steamui", "$upDir\ipc\steamclient" | Out-Null
-            foreach ($sub in @('steamclient','steamui')) {
-              try {
-                $list = Invoke-RestMethod -Uri "https://api.github.com/repos/OpenSteam001/steam-monitor/contents/$sub?ref=pattern" -UseBasicParsing
-                foreach ($item in $list) {
-                  if ($item.name -match '\.toml$') {
-                    Invoke-WebRequest -Uri $item.download_url -OutFile "$upDir\$sub\$($item.name)" -UseBasicParsing
-                  }
-                }
-              } catch { Write-Output "skip upstream $sub" }
-            }
-          } catch { Write-Output "skip upstream fetch" }
-
-          # 把 seed 拷到 pattern_updater.py 能找到的位置
-          foreach ($src in @('upstream_seed')) {
-            if (Test-Path $src) { Copy-Item -Recurse -force $src pattern_cache }
+          # 种子: 先用仓库里已有的 steamclient/ steamui/ 兜底
+          foreach ($sub in @('steamclient','steamui')) {
+            New-Item -ItemType Directory -force -path "pattern_cache\$sub" | Out-Null
+            if (Test-Path $sub) { Get-ChildItem $sub -filter *.toml | Copy-Item -Destination "pattern_cache\$sub" -force }
           }
+
+          # 上游 steam-monitor (pattern 分支): 有更新就覆盖
+          $upDir = "upstream_seed"
+          New-Item -ItemType Directory -force -path $upDir | Out-Null
+          foreach ($sub in @('steamclient','steamui')) {
+            try {
+              $list = Invoke-RestMethod -Uri "https://api.github.com/repos/OpenSteam001/steam-monitor/contents/$sub?ref=pattern" -UseBasicParsing
+              New-Item -ItemType Directory -force -path "$upDir\$sub" | Out-Null
+              foreach ($item in $list) {
+                if ($item.name -match '\.toml$') {
+                  Invoke-WebRequest -Uri $item.download_url -OutFile "$upDir\$sub\$($item.name)" -UseBasicParsing
+                }
+              }
+              Get-ChildItem "$upDir\$sub" -filter *.toml | Copy-Item -Destination "pattern_cache\$sub" -force
+              Write-Output "[upstream] pattern/$sub synced"
+            } catch { Write-Output "skip upstream pattern/$sub" }
+          }
+
+          # 上游 IPC (ipc 分支)
+          try {
+            $list = Invoke-RestMethod -Uri "https://api.github.com/repos/OpenSteam001/steam-monitor/contents/steamclient?ref=ipc" -UseBasicParsing
+            New-Item -ItemType Directory -force -path "$upDir\ipc\steamclient" | Out-Null
+            foreach ($item in $list) {
+              if ($item.name -match '\.toml$') {
+                Invoke-WebRequest -Uri $item.download_url -OutFile "$upDir\ipc\steamclient\$($item.name)" -UseBasicParsing
+              }
+            }
+            Write-Output "[upstream] ipc/steamclient synced"
+          } catch { Write-Output "skip upstream ipc" }
 
           # 跑生成器
           foreach ($dll in @('dlls\steamclient.dll', 'dlls\steamclient64.dll', 'dlls\steamui.dll')) {
