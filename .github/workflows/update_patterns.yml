@@ -28,7 +28,7 @@ jobs:
       - name: Install pefile
         run: pip install pefile --quiet
 
-      - name: Fetch DLLs (priority: release > staging)
+      - name: "Fetch DLLs (release > staging)"
         id: fetch
         run: |
           New-Item -ItemType Directory -force -path dlls | Out-Null
