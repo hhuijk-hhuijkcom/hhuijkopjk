@@ -31,3 +31,5 @@ push 到 main 后 workflow 也会自动触发 (workflow 里有 `push paths: stag
 - **steamclient.dll (32位)** 也会被尝试下载, 但 OpenSteamTool 只 hook 64 位版, 建议只传 64 位 DLL.
 - 第一次跑需要先有 **上游 steam-monitor 仓库对应的旧 TOML** 当 seed. 你的 fork 第一次可以手动从 steam-monitor 抄几个 TOML 当种子.
 - Bot 每次先尝试从 upstream steam-monitor 抄最新 TOML, 抄不到才走 sig 自匹配.
+
+<!-- trigger: 2026-10-30 19:54:01 -->
