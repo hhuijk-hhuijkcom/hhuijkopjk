@@ -1,13 +1,10 @@
 name: Sync Steam Pattern TOMLs
 
 on:
-  schedule:
-    - cron: '0 8 * * *'
+ 
   workflow_dispatch:
   # push staging/ (放入新 DLL) 时自动触发
-  push:
-    paths:
-      - 'staging/**'
+ 
 
 permissions:
   contents: write
