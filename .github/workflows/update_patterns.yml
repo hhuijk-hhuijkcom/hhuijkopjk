@@ -1,71 +1,158 @@
-name: Update Pattern TOML
+name: Sync Steam Pattern TOMLs
 
 on:
-  # 每天检查一次 Steam 更新
   schedule:
-    - cron: '0 8 * * *'   # UTC 8:00 = 北京时间 16:00
-  workflow_dispatch:      # 允许手动触发
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+  # 可选: push staging/ 目录时自动触发
+  push:
+    paths:
+      - 'staging/**'
 
 permissions:
   contents: write
 
 jobs:
-  update-patterns:
-    runs-on: windows-latest    # 需要 Windows 才能解析 PE 头
+  sync-patterns:
+    runs-on: windows-latest    # 需要 Windows 跑 PE 解析
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0       # 拉完整历史 (含所有分支)
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install deps
+      - name: Install pefile
         run: pip install pefile --quiet
-        # 注: capstone 在 sig 自匹配里没用 (纯 pefile + struct 足够), 省了
 
-      # === 下载 Steam DLL ===
-      - name: Download latest steamclient64.dll
+      # ========================================================
+      # Step 1: 拿最新 Steam DLL
+      # 优先级: GitHub Release asset > staging/ 目录 > 跳过
+      # ========================================================
+      - name: Fetch DLLs (priority: release > staging)
+        id: fetch
         run: |
           New-Item -ItemType Directory -Force -Path dlls | Out-Null
-          # Steam 官方 CDN, 固定稳定版 URL
-          $ProgressPreference = 'SilentlyContinue'
-          Invoke-WebRequest -Uri "https://steamcdn-a.akamaihd.net/client/installer/steamclient.dll" -OutFile "dlls\steamclient.dll"
-          if (Test-Path "dlls\steamclient64.dll") { Remove-Item "dlls\steamclient64.dll" }
-          # steamui.dll 随 Steam 主安装包走, CDN 上没有单独 URL
-          # 如果 fork 里已有 seed, 可跳过 download steamui 这步
+          $dlls = @('steamclient.dll', 'steamclient64.dll', 'steamui.dll')
+          $found = $false
 
-      # === 生成 pattern TOML ===
-      - name: Run pattern updater (steamclient)
+          # --- 1a. 先查最新 Release ---
+          try {
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$env:GITHUB_REPOSITORY/releases/latest" -UseBasicParsing
+            foreach ($dll in $dlls) {
+              $asset = $release.assets | Where-Object { $_.name -eq $dll } | Select-Object -First 1
+              if ($asset) {
+                Write-Output "[Release] Downloading $dll from $($asset.browser_download_url)"
+                Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "dlls\$dll" -UseBasicParsing
+                $found = $true
+              }
+            }
+          } catch {
+            Write-Output "No release found: $_"
+          }
+
+          # --- 1b. Release 没有? 读 staging/ ---
+          if (-not $found) {
+            Write-Output "[Staging] Reading from staging/"
+            foreach ($dll in $dlls) {
+              if (Test-Path "staging\$dll") {
+                Copy-Item "staging\$dll" "dlls\$dll" -Force
+                $found = $true
+              }
+            }
+          }
+
+          if (-not $found) {
+            Write-Output "::warning::No Steam DLLs found in Release or staging/. Either upload a release asset or commit to staging/"
+            $env:HAS_DLL = "false"
+          } else {
+            $env:HAS_DLL = "true"
+          }
+
+      # ========================================================
+      # Step 2: 用 pattern_updater.py 生成 TOML
+      #         (有 seed → 上游 TOML直接抄, 没 seed → sig自匹配)
+      # ========================================================
+      - name: Generate pattern TOMLs
+        if: env.HAS_DLL == 'true'
         run: |
-          python pattern_updater.py --dll "dlls\steamclient.dll" --component steamclient --out_dir "./output"
+          # 从上游 steam-monitor 抄最新 TOML 当 seed
+          try {
+            $upDir = "upstream_seed"
+            New-Item -ItemType Directory -Force -Path $upDir, "$upDir\steamclient", "$upDir\steamui", "$upDir\ipc\steamclient" | Out-Null
+            foreach ($sub in @('steamclient','steamui')) {
+              try {
+                $list = Invoke-RestMethod -Uri "https://api.github.com/repos/OpenSteam001/steam-monitor/contents/$sub?ref=pattern" -UseBasicParsing
+                foreach ($item in $list) {
+                  if ($item.name -match '\.toml$') {
+                    Invoke-WebRequest -Uri $item.download_url -OutFile "$upDir\$sub\$($item.name)" -UseBasicParsing
+                  }
+                }
+              } catch { Write-Output "skip upstream $sub" }
+            }
+          } catch { Write-Output "skip upstream fetch" }
 
-      # === 提交到 pattern 分支 ===
+          # 把 seed 拷到 pattern_updater.py 能找到的位置
+          $seedMap = @{
+            "upstream_seed" = "pattern_cache"
+          }
+          foreach ($src in $seedMap.Keys) {
+            if (Test-Path $src) { Copy-Item -Recurse -Force $src $seedMap[$src] }
+          }
+
+          # 跑生成器
+          foreach ($dll in @('dlls\steamclient.dll', 'dlls\steamclient64.dll', 'dlls\steamui.dll')) {
+            if (-not (Test-Path $dll)) { continue }
+            $name = [System.IO.Path]::GetFileName($dll)
+            $component = if ($name -match 'steamui') { 'steamui' } else { 'steamclient' }
+            Write-Output "=== Processing $name → $component ==="
+            python pattern_updater.py --dll $dll --component $component --out_dir "./output"
+          }
+
+      # ========================================================
+      # Step 3: Commit & push
+      # ========================================================
       - name: Commit to pattern branch
+        if: env.HAS_DLL == 'true'
         run: |
-          $sha = (Get-FileHash "dlls\steamclient.dll" -Algorithm SHA256).Hash.ToLower()
+          if (-not (Test-Path "output")) { Write-Output "No output dir — skip"; exit 0 }
           git config user.name "OpenSteamTool Bot"
           git config user.email "bot@users.noreply.github.com"
 
-          # 先切到 pattern 分支 (不存在就从 main 新建)
-          $branchExists = git branch --list pattern
-          if (-not $branchExists) {
-            git checkout -b pattern
-          } else {
-            git checkout pattern
-            git pull origin pattern
+          # 确保 main + 所有产物在同一个分支
+          git checkout main
+
+          $any = $false
+          foreach ($sub in @('steamclient','steamui')) {
+            $srcDir = "output\pattern\$sub"
+            if (-not (Test-Path $srcDir)) { continue }
+            New-Item -ItemType Directory -Force -Path $sub | Out-Null
+            Get-ChildItem $srcDir -Filter *.toml | ForEach-Object {
+              Copy-Item $_.FullName "$sub\$($_.Name)" -Force
+              Write-Output "  → $sub\$($_.Name)"
+              $any = $true
+            }
           }
 
-          $src = "output\pattern\steamclient\$sha.toml"
-          if (Test-Path $src) {
-            New-Item -ItemType Directory -Force -Path "steamclient" | Out-Null
-            Copy-Item $src "steamclient\$sha.toml" -Force
-            git add "steamclient\$sha.toml"
-            git commit -m "pattern: steamclient64 $sha" || Write-Output "no changes"
-            git push origin pattern || Write-Output "push failed (need auth?)"
-          } else {
-            Write-Output "No TOML generated — upstream may already have it"
+          # IPC TOML 如果 staging 里有, 也带上
+          if (Test-Path "upstream_seed\ipc\steamclient") {
+            New-Item -ItemType Directory -Force -Path "ipc\steamclient" | Out-Null
+            Get-ChildItem "upstream_seed\ipc\steamclient" -Filter *.toml | ForEach-Object {
+              Copy-Item $_.FullName "ipc\steamclient\$($_.Name)" -Force
+              $any = $true
+            }
           }
-        continue-on-error: true
+
+          git add -A
+          $count = (git diff --cached --name-only).Count
+          Write-Output "Staged $count files"
+          if ($count -gt 0) {
+            git commit -m "sync TOML(s): $count files — steam auto-build $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+            git push origin main
+            Write-Output "✅ Pushed!"
+          } else {
+            Write-Output "Nothing to commit (fork is in sync)"
+          }
