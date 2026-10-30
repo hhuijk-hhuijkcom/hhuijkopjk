@@ -33,3 +33,5 @@ push 到 main 后 workflow 也会自动触发 (workflow 里有 `push paths: stag
 - Bot 每次先尝试从 upstream steam-monitor 抄最新 TOML, 抄不到才走 sig 自匹配.
 
 <!-- trigger: 2026-10-30 19:54:01 -->
+
+<!-- trigger2: 2026-10-30 20:06:46 -->
