@@ -17,3 +17,6 @@ Thumbs.db
 # 测试文件
 _*.py
 pattern_*.toml
+
+# CI 工作目录
+_ci/
