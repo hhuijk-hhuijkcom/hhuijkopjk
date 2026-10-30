@@ -1,0 +1,74 @@
+name: Update Pattern TOML
+on:
+  # 每天检查一次 Steam 更新
+  schedule:
+    - cron: '0 8 * * *'   # UTC 8:00 = 北京时间 16:00
+  workflow_dispatch:      # 允许手动触发
+
+permissions:
+  contents: write
+
+jobs:
+  update-patterns:
+    runs-on: windows-latest    # 需要 Windows 才能解析 PE 头
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          branches: [pattern, ipc, main, protobuf]   # 拉全部分支找种子
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deps
+        run: pip install pefile capstone --quiet
+
+      # === 下载最新 Steam ===
+      - name: Download latest steamclient64.dll
+        run: |
+          # Steam 官方 CDN (自动跟踪最新稳定版)
+          # 也可以换成 steam-cdn 镜像
+          New-Item -ItemType Directory -Force -Path dlls | Out-Null
+          Invoke-WebRequest -Uri "https://steamcdn-a.akamaihd.net/client/installer/steamclient.dll" -OutFile "dlls\steamclient.dll" -UseBasicParsing
+          # 64 位版: steamclient64.dll 通常随 Steam 主包提供
+          # 如果 64 位版单独分发, 换用对应 URL
+          Invoke-WebRequest -Uri "https://steamcdn-a.akamaihd.net/client/installer/steamui.dll" -OutFile "dlls\steamui.dll" -UseBasicParsing
+        timeout-minutes: 10
+
+      # === 生成 pattern TOML ===
+      - name: Run pattern updater (steamclient)
+        run: |
+          python pattern_updater.py --dll "dlls\steamclient.dll" --component steamclient --out_dir "./output"
+        continue-on-error: true
+
+      - name: Run pattern updater (steamui)
+        run: |
+          python pattern_updater.py --dll "dlls\steamui.dll" --component steamui --out_dir "./output"
+        continue-on-error: true
+
+      # === 提交 ===
+      - name: Commit and push pattern branch
+        run: |
+          $sha256 = (Get-FileHash "dlls\steamclient.dll" -Algorithm SHA256).Hash.ToLower()
+          git checkout pattern
+          if (Test-Path "output\pattern\steamclient\$sha256.toml") {
+            Copy-Item "output\pattern\steamclient\$sha256.toml" "steamclient\$sha256.toml" -Force
+            git add -A
+            git config user.name "OpenSteamTool Bot"
+            git config user.email "bot@users.noreply.github.com"
+            git commit -m "pattern: add/update steamclient $sha256" || echo "nothing changed"
+            git push origin pattern || echo "push failed"
+          }
+
+      - name: Run pattern updater (steamui) — commit to pattern branch
+        run: |
+          $sha256 = (Get-FileHash "dlls\steamui.dll" -Algorithm SHA256).Hash.ToLower()
+          git checkout pattern
+          if (Test-Path "output\pattern\steamui\$sha256.toml") {
+            Copy-Item "output\pattern\steamui\$sha256.toml" "steamui\$sha256.toml" -Force
+            git add -A
+            git commit -m "pattern: add/update steamui $sha256" || echo "nothing changed"
+            git push origin pattern || echo "push failed"
+          }
