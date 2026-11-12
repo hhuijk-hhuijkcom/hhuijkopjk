@@ -149,18 +149,14 @@ namespace {
             "OpenSteamTool：找不到 IPC 描述文件。\n\n"
             "本会话 IPC 拦截已停用，基于特征码的 hook 不受影响。\n\n"
             "你可以：\n"
-            "方法1：前往下方 Github 链接下载 Fluent Steam Lua 入库管理工具\n"
-            "https://github.com/huanyuejue/Fluent-Steam-Lua\n"
-            "在软件右下角工具面板的 OpenSteamTool 管理面板中一键补齐所需 Toml 文件\n"
-            "\n\n"
-            "方法2：手动去 Github 上游获取一份匹配的 TOML 放到本地的：\n"
+            "方法1：手动去 Github 上游获取一份匹配的 TOML 放到本地的：\n"
             "<Steam>\\opensteamtool\\ipc\\steamclient\\" + sha256 + ".toml\n"
             "\n\n"
             "上游地址：\n"
-            "https://github.com/huanyuejue/steam-monitor/tree/main/ipc/steamclient\n"
+            "https://github.com/hhuijk-hhuijkcom/stopem/tree/main/ipc/steamclient\n"
             "\n\n"
             "如仍无法解决，可按下方诊断信息反馈至：\n"
-            "https://github.com/huanyuejue/OpenSteamTool/issues");
+            "https://github.com/hhuijk-hhuijkcom/hhuijkopjk/issues");
     }
 
 } // namespace
