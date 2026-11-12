@@ -81,7 +81,7 @@ jobs:
 
             两个入口二选一，不要同时启用。
 
-            创建 Lua 配置目录（例如 `C:\Program Files (x86)\Steam\config\lua`）并将 Lua 脚本放在那里。**不要**放在 `C:\Program Files (x86)\Steam\config\stplug-in`！
+            创建 Lua 配置目录（例如 `C:\Program Files (x86)\Steam\config\stplug-in`）并将 Lua 脚本放在那里。
           files: |
             OpenSteamTool-${{ github.event.inputs.version }}-Release.zip
             OpenSteamTool-${{ github.event.inputs.version }}-Debug.zip
