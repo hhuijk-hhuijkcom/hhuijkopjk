@@ -118,6 +118,14 @@ enabled = false
 # Defaults to "<Steam>/cloud_redirect.dll" when unset.
 # library = "cloud_redirect.dll"
 
+[cache]
+# Clear Steam's app metadata cache on every startup.
+# Deletes <Steam>/appcache/appinfo.vdf and packageinfo.vdf before Steam reads
+# them; Steam re-fetches them automatically. Fixes the install page showing
+# "0 B" for some games when its cached app info is stale.
+# Set to false if you prefer not to trade a little startup re-download for it.
+clear_appcache = true
+
 [remote]
 # Optional metadata mirror. Leave unset to use gh-proxy with GitHub fallback.
 # A custom mirror replaces the built-in remote sources and must include all
