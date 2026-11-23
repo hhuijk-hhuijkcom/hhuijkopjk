@@ -25,6 +25,7 @@ namespace {
         std::string presenceDisplay = "spacewar";
         InjectionSettings injection;
         CloudSettings cloud;
+        bool clearAppCache = true;
     };
 
     std::mutex g_mutex;
@@ -73,6 +74,7 @@ namespace {
         injectLibraryX64       = snapshot.injection.libraryX64;
         cloudEnabled           = snapshot.cloud.enabled;
         cloudLibrary           = snapshot.cloud.library;
+        clearAppCache          = snapshot.clearAppCache;
     }
 
     void ApplyManifestProvider(const std::string& provider) {
@@ -214,6 +216,12 @@ namespace {
                     snapshot.cloud.library = *val;
             }
 
+            // [cache]
+            if (auto cache = tbl["cache"].as_table()) {
+                if (auto val = (*cache)["clear_appcache"].value<bool>())
+                    snapshot.clearAppCache = *val;
+            }
+
             ApplyManifestProvider(snapshot.manifestProvider);
             ManifestClient::SetFailoverEnabled(snapshot.manifestFailover);
             LoadResult result = ApplySnapshotLocked(snapshot);
@@ -309,6 +317,11 @@ namespace {
             cloudEnabled,
             cloudLibrary,
         };
+    }
+
+    bool GetClearAppCache() {
+        std::lock_guard lock(g_mutex);
+        return clearAppCache;
     }
 
 }
