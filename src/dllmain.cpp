@@ -79,6 +79,48 @@ bool CopySteamClientToDiversion() {
     return false;
 }
 
+// Steam 把商店/安装信息缓存在 appcache\appinfo.vdf 和 packageinfo.vdf。
+// 缓存陈旧时安装页会把大小显示成 0 B（Metro 这类新游戏尤其明显），Steam
+// 自己不会主动失效；启动时先删掉，Steam 会重新拉一份干净的。
+// 文件可能被上一条 Steam 进程占用，失败只告警，不影响本次启动。
+constexpr int kAppCacheClearRetries = 3;
+constexpr std::chrono::milliseconds kAppCacheClearRetryDelay{100};
+
+void ClearSteamAppCache() {
+    static const char* const kFiles[] = {
+        "appcache\\appinfo.vdf",
+        "appcache\\packageinfo.vdf",
+    };
+    for (const char* rel : kFiles) {
+        char path[kRuntimePathCapacity] = {};
+        sprintf_s(path, "%s\\%s", SteamInstallPath, rel);
+        DWORD gle = ERROR_SUCCESS;
+        bool removed = false;
+        for (int attempt = 1; attempt <= kAppCacheClearRetries; ++attempt) {
+            if (DeleteFileA(path)) {
+                removed = true;
+                break;
+            }
+            gle = GetLastError();
+            if (gle == ERROR_FILE_NOT_FOUND || gle == ERROR_PATH_NOT_FOUND) break;
+            // 只读属性会让 DeleteFile 永远失败，清掉再重试。
+            if (gle == ERROR_ACCESS_DENIED) {
+                SetFileAttributesA(path, FILE_ATTRIBUTE_NORMAL);
+            }
+            if (attempt < kAppCacheClearRetries) {
+                std::this_thread::sleep_for(kAppCacheClearRetryDelay);
+            }
+        }
+        if (removed) {
+            LOG_INFO("AppCache: cleared {}", path);
+        } else if (gle == ERROR_FILE_NOT_FOUND || gle == ERROR_PATH_NOT_FOUND) {
+            LOG_DEBUG("AppCache: {} not present, nothing to clear", path);
+        } else {
+            LOG_WARN("AppCache: failed to clear {} (err={}), keeping stale cache", path, gle);
+        }
+    }
+}
+
 } // namespace
 
 // 回退到原版 steamclient：B2（劫持没装上）和超时看门狗（Steam 不来换）共用。
@@ -251,6 +293,9 @@ static uint32_t InitThread(OSTPlatform::DynamicLibrary::ModuleHandle selfModule)
         Hooks_SteamUI::InstallFirstLoadRedirect();
 
     Config::Load(ConfigPath);
+    // 商店/安装页的 0 B 大小源于陈旧 appcache，启动时清掉（可在 toml 关闭）。
+    if (Config::GetClearAppCache())
+        ClearSteamAppCache();
     Log::InitModules();
     Log::InstallPlatformLogSink();
     SteamDiagnostics::Initialize(SteamclientPath, SteamUIPath);
