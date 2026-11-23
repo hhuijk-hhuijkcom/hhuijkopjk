@@ -47,6 +47,10 @@ namespace Config {
     // Anything other than "none" keeps the current broadcast behavior.
     bool GetPresenceBroadcastEnabled();
 
+    // [cache] — clear steam appcache (appinfo.vdf / packageinfo.vdf) on startup.
+    // Stale cache makes the install page show 0 B for some games.
+    bool GetClearAppCache();
+
     // [manifest] — provider selection lives in ManifestClient (table-driven).
     inline uint32_t manifestTimeoutResolve = 5000;
     inline uint32_t manifestTimeoutConnect = 5000;
@@ -85,5 +89,8 @@ namespace Config {
     // [cloud] - optional Steam Cloud save redirection via CloudRedirect.
     inline bool cloudEnabled = false;
     inline std::string cloudLibrary;
+
+    // [cache] - 启动时清除 Steam appcache（appinfo.vdf / packageinfo.vdf）。
+    inline bool clearAppCache = true;
 
 }
